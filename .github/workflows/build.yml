@@ -25,7 +25,7 @@ jobs:
       - name: Setup Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev curl xz-utils patch python3 cmake ninja-build
+          sudo apt-get install -y build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev curl xz-utils patch python3 cmake ninja-build git
 
       - name: Cache XSDK Toolchain
         id: cache-xsdk
@@ -34,6 +34,7 @@ jobs:
           path: |
             ~/xsdk-gcc
             ~/xsdk-gcc-work
+            ~/xsdk
           key: ${{ runner.os }}-xsdk-toolchain-v1
 
       - name: Build XSDK Toolchain (if not cached)
@@ -41,14 +42,19 @@ jobs:
         run: |
           git clone https://github.com/xenosworks/xsdk.git ~/xsdk
           cd ~/xsdk
-          # परमिशन फिक्स: स्क्रिप्ट को एक्ज़ीक्यूटेबल बनाएं
           chmod +x tools/toolchain/build.sh
-          # bash के ज़रिए रन करें (डबल सेफ्टी)
           PREFIX=$HOME/xsdk-gcc WORK=$HOME/xsdk-gcc-work JOBS=$(nproc) bash tools/toolchain/build.sh
+
+      - name: Build xsdk Library
+        run: |
+          cd ~/xsdk
+          make -j$(nproc)
 
       - name: Configure for Xbox 360
         run: |
-          cmake -S . -B build_x360 -G Ninja -DXSDK_TOOLCHAIN=$HOME/xsdk-gcc/bin/powerpc-xsdk-elf-
+          cmake -S . -B build_x360 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$HOME/xsdk/cmake/xsdk.cmake \
+            -DXSDK_TOOLCHAIN=$HOME/xsdk-gcc
 
       - name: Build Xbox 360 .xex
         run: |
