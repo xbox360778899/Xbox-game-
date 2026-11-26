@@ -1,11 +1,58 @@
 #include <cstdio>
-#include <cmath> // abs() ke liye
+#include <cmath>
 #include "inkfox_core.hpp"
 
-// Xbox 360 Controller Header
-#include <xinput.h> 
-
 using namespace inkfox;
+
+// =========================================================
+// 🎮 कस्टम XINPUT स्ट्रक्चर (xinput.h के बिना)
+// =========================================================
+struct XINPUT_GAMEPAD {
+    unsigned short wButtons;
+    unsigned char  bLeftTrigger;
+    unsigned char  bRightTrigger;
+    short          sThumbLX;
+    short          sThumbLY;
+    short          sThumbRX;
+    short          sThumbRY;
+};
+
+struct XINPUT_STATE {
+    unsigned long  dwPacketNumber;
+    XINPUT_GAMEPAD Gamepad;
+};
+
+// बटनों के कोड (XInput स्टैंडर्ड के अनुसार)
+#define XINPUT_GAMEPAD_DPAD_UP        0x0001
+#define XINPUT_GAMEPAD_DPAD_DOWN      0x0002
+#define XINPUT_GAMEPAD_DPAD_LEFT      0x0004
+#define XINPUT_GAMEPAD_DPAD_RIGHT     0x0008
+#define XINPUT_GAMEPAD_START          0x0010
+#define XINPUT_GAMEPAD_BACK           0x0020
+#define XINPUT_GAMEPAD_LEFT_THUMB     0x0040
+#define XINPUT_GAMEPAD_RIGHT_THUMB    0x0080
+#define XINPUT_GAMEPAD_LEFT_SHOULDER  0x0100
+#define XINPUT_GAMEPAD_RIGHT_SHOULDER 0x0200
+#define XINPUT_GAMEPAD_A              0x1000
+#define XINPUT_GAMEPAD_B              0x2000
+#define XINPUT_GAMEPAD_X              0x4000
+#define XINPUT_GAMEPAD_Y              0x8000
+
+// डेडज़ोन (Joystick की संवेदनशीलता)
+#define XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE  7849
+
+// =========================================================
+// 🎮 XInputGetState का स्टब (Stub) फंक्शन
+// =========================================================
+// फिलहाल हम इसे ऐसे ही रख रहे हैं। अगर गेम क्रैश होता है, तो
+// हम इसे बाद में XSDK के असली इनपुट फंक्शन से बदल देंगे।
+unsigned long XInputGetState(unsigned long dwUserIndex, XINPUT_STATE* pState) {
+    // हम एक डमी स्टेट लौटा रहे हैं ताकि कोड कंपाइल हो जाए
+    pState->Gamepad.wButtons = 0; // कोई बटन नहीं दबा है
+    pState->Gamepad.sThumbLX = 0;
+    return 0; // 0 का मतलब ERROR_SUCCESS
+}
+// =========================================================
 
 static RockSpr rock(int id, float w, float h) {
   RockSpr r; r.id = id; r.w = w; r.h = h; 
@@ -14,75 +61,42 @@ static RockSpr rock(int id, float w, float h) {
 }
 
 int main() {
-  // 1. Game Initialize Karein
   Sprites s;
   s.rocks = { rock(0, 6, 2.5f), rock(1, 5, 2.2f), rock(2, 2.2f, 4.f), rock(3, 3.f, 3.f) };
   s.strokes = { StrokeSpr{0, 4, 1, .1f, .9f, .5f} };
   
   Game g(std::move(s));
   
-  // Title screen se aage badhne ke liye Start dabayein
-  bool controllerConnected = false;
   printf("Game Started. Waiting for controller input...\n");
 
   float dt = 1.f / 60;
 
-  // 2. Infinite Game Loop (Jab tak game over nahi hota)
   while (g.mode != Mode::Over) {
-    
-    // Controller ki state padhein
     XINPUT_STATE state;
-    ZeroMemory(&state, sizeof(XINPUT_STATE));
-    
-    // Player 1 (Port 0) ka controller check karein
-    if (XInputGetState(0, &state) == ERROR_SUCCESS) {
-        controllerConnected = true;
+    XInputGetState(0, &state); // हमारा कस्टम फंक्शन कॉल होगा
 
-        // --- BUTTON MAPPING ---
-        // A Button = Jump
-        g.input.jumpPressed = (state.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
-        g.input.jump = g.input.jumpPressed; 
+    // --- BUTTON MAPPING ---
+    g.input.jumpPressed = (state.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
+    g.input.jump = g.input.jumpPressed; 
 
-        // X Button = Paint (Ink Shoot karna)
-        g.input.paintPressed = (state.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0;
-        g.input.paint = g.input.paintPressed;
+    g.input.paintPressed = (state.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0;
+    g.input.paint = g.input.paintPressed;
 
-        // D-Pad Down ya Left Stick Down = Neeche dekhna/angle change
-        g.input.down = (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0;
+    g.input.down = (state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0;
 
-        // Start Button = Game Start/Restart
-        if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_START) != 0) {
-            g.input.start = true;
-        }
-
-        // Left Joystick (Speed Control)
-        // 32767 max value hoti hai joystick ki
-        float stickX = (float)state.Gamepad.sThumbLX;
-        if (abs(stickX) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) {
-            g.input.speedAxis = stickX / 32767.0f; // -1.0 se 1.0 ke beech
-        } else {
-            g.input.speedAxis = 0.0f; // Deadzone (No input)
-        }
-    } else {
-        // Agar controller unplugged hai, toh bot khud khelega
-        auto& f = g.fox;
-        bool ahead = false;
-        for (auto& p : g.plats) { 
-          float sfc = p->surf(f.x + 0.3f + f.vx * 0.06f); 
-          if (has(sfc) && sfc < f.y + 0.8f && sfc > f.y - 1.0f) ahead = true; 
-        }
-        g.input.jumpPressed = f.grounded && !ahead; 
-        g.input.jump = g.input.jumpPressed || (!f.grounded && f.vy > 0);
-        g.input.paintPressed = !f.grounded && f.vy < -6 && g.ink > 10; 
-        g.input.paint = g.input.paintPressed;
+    if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_START) != 0) {
+        g.input.start = true;
     }
 
-    // 3. Game ko Update Karein
+    float stickX = (float)state.Gamepad.sThumbLX;
+    if (abs(stickX) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) {
+        g.input.speedAxis = stickX / 32767.0f;
+    } else {
+        g.input.speedAxis = 0.0f;
+    }
+
     g.tick(dt);
     g.events.clear();
-    
-    // (Optional) Yahan aap GPU par draw karne ka code likhenge
-    // Render(g); 
   }
 
   printf("Game Over! Mode: %d\n", int(g.mode));
