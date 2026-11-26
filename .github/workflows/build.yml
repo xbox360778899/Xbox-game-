@@ -1,0 +1,64 @@
+name: Build Ink Fox (PC + Xbox 360)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # ==========================================
+  # JOB 1: PC Build & Test (तेज़ चेक)
+  # ==========================================
+  pc-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure PC
+        run: cmake -S . -B build_pc -DCMAKE_BUILD_TYPE=Release
+      - name: Build PC
+        run: cmake --build build_pc -j4
+      - name: Run PC Test
+        run: ./build_pc/inkfox_test
+
+  # ==========================================
+  # JOB 2: Xbox 360 XEX Build (मुख्य काम)
+  # ==========================================
+  xbox360-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev curl xz-utils patch python3 cmake ninja-build
+
+      - name: Cache XSDK Toolchain
+        id: cache-xsdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/xsdk-gcc
+            ~/xsdk-gcc-work
+          key: ${{ runner.os }}-xsdk-toolchain-v1
+
+      - name: Build XSDK Toolchain (if not cached)
+        if: steps.cache-xsdk.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/xenosworks/xsdk.git ~/xsdk
+          cd ~/xsdk
+          PREFIX=$HOME/xsdk-gcc WORK=$HOME/xsdk-gcc-work JOBS=$(nproc) tools/toolchain/build.sh
+
+      - name: Configure for Xbox 360
+        run: |
+          cmake -S . -B build_x360 -G Ninja -DXSDK_TOOLCHAIN=$HOME/xsdk-gcc/bin/powerpc-xsdk-elf-
+
+      - name: Build Xbox 360 .xex
+        run: |
+          cmake --build build_x360 -j4
+
+      - name: Upload XEX Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InkFox-Xbox360
+          path: build_x360/**/*.xex
